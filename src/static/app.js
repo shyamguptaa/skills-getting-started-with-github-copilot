@@ -10,8 +10,9 @@ document.addEventListener("DOMContentLoaded", () => {
       const response = await fetch("/activities");
       const activities = await response.json();
 
-      // Clear loading message
-      activitiesList.innerHTML = "";
+  // Clear loading message and reset activity select (avoid duplicate options on refresh)
+  activitiesList.innerHTML = "";
+  activitySelect.innerHTML = '<option value="">-- Select an activity --</option>';
 
       // Populate activities list
       Object.entries(activities).forEach(([name, details]) => {
@@ -20,12 +21,12 @@ document.addEventListener("DOMContentLoaded", () => {
 
         const spotsLeft = details.max_participants - details.participants.length;
 
-        // Basic content
+        // Basic content (availability has a class so we can update it after unregister)
         activityCard.innerHTML = `
           <h4>${name}</h4>
           <p>${details.description}</p>
           <p><strong>Schedule:</strong> ${details.schedule}</p>
-          <p><strong>Availability:</strong> ${spotsLeft} spots left</p>
+          <p class="availability"><strong>Availability:</strong> ${spotsLeft} spots left</p>
         `;
 
         // Participants section
@@ -59,8 +60,48 @@ document.addEventListener("DOMContentLoaded", () => {
             emailSpan.className = "participant-email";
             emailSpan.textContent = email;
 
+            // Delete (unregister) button
+            const deleteBtn = document.createElement("button");
+            deleteBtn.className = "participant-delete";
+            deleteBtn.setAttribute("aria-label", `Unregister ${email}`);
+            deleteBtn.title = "Unregister";
+            // Use a simple multiplication sign which is widely supported
+            deleteBtn.textContent = "×";
+
+            // Handler for unregistering
+            deleteBtn.addEventListener("click", async () => {
+              try {
+                const resp = await fetch(
+                  `/activities/${encodeURIComponent(name)}/unregister?email=${encodeURIComponent(email)}`,
+                  { method: "DELETE" }
+                );
+
+                const result = await resp.json();
+
+                if (resp.ok) {
+                  // Remove from DOM
+                  ul.removeChild(li);
+
+                  // Update local participants list so availability recalculation is accurate
+                  details.participants = details.participants.filter((e) => e !== email);
+
+                  // Update availability text
+                  const availabilityEl = activityCard.querySelector(".availability");
+                  if (availabilityEl) {
+                    const newSpots = details.max_participants - details.participants.length;
+                    availabilityEl.innerHTML = `<strong>Availability:</strong> ${newSpots} spots left`;
+                  }
+                } else {
+                  console.error("Failed to unregister:", result.detail || result);
+                }
+              } catch (err) {
+                console.error("Error unregistering participant:", err);
+              }
+            });
+
             li.appendChild(badge);
             li.appendChild(emailSpan);
+            li.appendChild(deleteBtn);
             ul.appendChild(li);
           });
 
@@ -108,6 +149,9 @@ document.addEventListener("DOMContentLoaded", () => {
         messageDiv.textContent = result.message;
         messageDiv.className = "success";
         signupForm.reset();
+
+        // Refresh the activities UI so the new participant appears without a manual reload
+        await fetchActivities();
       } else {
         messageDiv.textContent = result.detail || "An error occurred";
         messageDiv.className = "error";
